@@ -1,0 +1,14 @@
+# Never commit these
+config/.env
+*.env
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Logs and data
+logs/
+data/trade_log.db

@@ -1,0 +1,35 @@
+indian_stocks:
+  - "RELIANCE.NS"
+  - "INFY.NS"
+  - "TCS.NS"
+  - "HDFCBANK.NS"
+  - "ICICIBANK.NS"
+  - "WIPRO.NS"
+  - "LT.NS"
+  - "BAJFINANCE.NS"
+  - "TITAN.NS"
+  - "ADANIENT.NS"
+  - "TATAGOLD.NS"
+  - "NIFTYBEES.NS"
+  - "ICICIAMC.NS"
+  - "METALIETF.NS"
+  - "SILVERIETF.NS"
+  - "MON100.NS"
+
+us_stocks:
+  - "AAPL"
+  - "MSFT"
+  - "NVDA"
+  - "GOOGL"
+  - "META"
+  - "AMZN"
+  - "TSLA"
+  - "AMD"
+  - "ASML"
+  - "SOXL"
+  - "VOO"
+  - "SCHD"
+  - "USD"
+
+portfolio_capital_inr: 100000
+portfolio_capital_usd: 200

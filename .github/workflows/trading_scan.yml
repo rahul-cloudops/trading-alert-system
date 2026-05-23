@@ -1,0 +1,50 @@
+name: Trading Alert Scanner
+
+on:
+  schedule:
+    # All times are UTC. IST = UTC+5:30
+    # 9:20 AM IST  = 03:50 UTC
+    - cron: '50 3 * * 1-5'
+    # 3:10 PM IST  = 09:40 UTC
+    - cron: '40 9 * * 1-5'
+    # 1:30 AM IST (US market EOD) = 20:00 UTC previous day
+    - cron: '0 20 * * 1-5'
+
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'           # caches pip downloads — faster subsequent runs
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run trading scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALPHA_VANTAGE_KEY: ${{ secrets.ALPHA_VANTAGE_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          RISK_PER_TRADE_PERCENT: "2.0"
+          MAX_POSITIONS: "5"
+          SWING_LOOKBACK_DAYS: "90"
+        run: python main.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs
+          path: logs/
+          retention-days: 7
