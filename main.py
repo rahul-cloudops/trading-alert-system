@@ -18,6 +18,10 @@ env_path = Path(__file__).parent / "config" / ".env"
 if env_path.exists():
     load_dotenv(env_path)
 
+# Ensure log directory exists (locally and on CI)
+os.makedirs("logs", exist_ok=True)
+os.makedirs("data", exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',

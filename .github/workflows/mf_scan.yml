@@ -1,0 +1,45 @@
+name: Mutual Fund Dip Alert Scanner
+
+on:
+  schedule:
+    # 7:00 PM IST = 13:30 UTC  (AMFI publishes NAVs by 6 PM IST daily)
+    # Runs Mon–Fri only (markets and AMFI are closed on weekends)
+    - cron: '30 13 * * 1-5'
+
+  # Run manually from GitHub Actions UI for testing
+  workflow_dispatch:
+
+jobs:
+  mf-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create required directories
+        run: mkdir -p logs data
+
+      - name: Run MF dip scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python mf_main.py
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mf-error-logs
+          path: logs/
+          retention-days: 7
