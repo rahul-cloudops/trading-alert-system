@@ -15,6 +15,8 @@ indian_stocks:
   - "METALIETF.NS"
   - "SILVERIETF.NS"
   - "MON100.NS"
+  - "TATSILV.NS"
+  - "SILVERIETF.NS"
 
 us_stocks:
   - "AAPL"

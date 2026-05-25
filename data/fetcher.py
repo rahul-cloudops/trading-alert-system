@@ -14,18 +14,6 @@ class MarketDataFetcher:
     def fetch_ohlcv(self, ticker: str) -> pd.DataFrame:
         """Fetch OHLCV data for a given ticker."""
         try:
-            # df = yf.download(
-            #     ticker,
-            #     start=self.start_date.strftime("%Y-%m-%d"),
-            #     end=self.end_date.strftime("%Y-%m-%d"),
-            #     interval="1d",
-            #     progress=False
-            # )
-            # if df.empty:
-            #     logger.warning(f"No data for {ticker}")
-            #     return pd.DataFrame()
-            # df.dropna(inplace=True)
-
             df = yf.download(
                 ticker,
                 start=self.start_date.strftime("%Y-%m-%d"),
