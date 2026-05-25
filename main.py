@@ -116,9 +116,15 @@ def run_scan():
                 )
                 signal_data.update(risk_data)
 
-                approved, reason = risk_mgr.apply_filters(signal_data)
+                approved, reason, downgrade = risk_mgr.apply_filters(signal_data)
+
                 if not approved:
                     logger.info(f"    Filtered out: {reason}")
+                    
+                    # If downgraded to WATCH, still add to summary — don't drop entirely
+                    if downgrade == "WATCH":
+                        signal_data["signal"] = "WATCH"
+                        all_results.append({**signal_data, "ticker": ticker, "market": market})
                     continue
 
                 company = TICKER_NAMES.get(ticker, ticker.replace(".NS", ""))

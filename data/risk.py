@@ -47,17 +47,30 @@ class RiskManager:
         max_single_position = int(self.capital * 0.20 / risk_per_share)
         return min(units, max_single_position)  # Never >20% in one stock
 
-    def apply_filters(self, signal_data: dict) -> tuple[bool, str]:
-        """Gate-keeping filters before issuing an alert."""
+    def apply_filters(self, signal_data: dict) -> tuple[bool, str, str]:
+        """
+        Returns (approved, reason, downgrade_signal)
+        
+        approved=True  → send a BUY/SELL alert
+        approved=False → suppress alert
+        downgrade_signal → if not None, override signal to this value
+                        so the stock still appears in the daily summary
+        """
         score = signal_data.get("score", 0)
         rr    = signal_data.get("risk_reward_ratio", 0)
         adx   = signal_data.get("adx", 0)
 
+        # Hard filters — these genuinely disqualify the trade setup
         if score < 55 and signal_data.get("signal") == "BUY":
-            return False, f"Score too low ({score})"
-        if rr < 1.5:
-            return False, f"Risk/Reward too low ({rr})"
-        if signal_data.get("signal") == "BUY" and adx < 20:
-            return False, f"Weak trend (ADX {adx})"
+            return False, f"Score too low ({score})", None
 
-        return True, "Passed all filters"
+        if rr < 1.5:
+            return False, f"Risk/Reward too low ({rr})", None
+
+        # Soft filter — weak trend means WATCH, not disqualify
+        # Silver ETFs and commodities consolidate for long periods
+        # before trending — we still want to monitor them
+        if signal_data.get("signal") == "BUY" and adx is not None and adx < 20:
+            return False, f"Weak trend (ADX {adx:.2f}) — downgraded to WATCH", "WATCH"
+
+        return True, "Passed all filters", None
