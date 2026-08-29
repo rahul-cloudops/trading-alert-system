@@ -104,7 +104,7 @@ def run_scan():
                     continue
 
                 df = ta_engine.compute_indicators(df)
-                signal_data = ta_engine.generate_signal(df)
+                signal_data = ta_engine.generate_signal(df, ticker)
 
                 if signal_data['signal'] in ('HOLD', 'INSUFFICIENT_DATA'):
                     continue

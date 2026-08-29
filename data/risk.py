@@ -59,18 +59,19 @@ class RiskManager:
         score = signal_data.get("score", 0)
         rr    = signal_data.get("risk_reward_ratio", 0)
         adx   = signal_data.get("adx", 0)
+        is_etf = signal_data.get("is_etf", False)
 
-        # Hard filters — these genuinely disqualify the trade setup
         if score < 55 and signal_data.get("signal") == "BUY":
             return False, f"Score too low ({score})", None
 
         if rr < 1.5:
             return False, f"Risk/Reward too low ({rr})", None
 
-        # Soft filter — weak trend means WATCH, not disqualify
-        # Silver ETFs and commodities consolidate for long periods
-        # before trending — we still want to monitor them
-        if signal_data.get("signal") == "BUY" and adx is not None and adx < 20:
-            return False, f"Weak trend (ADX {adx:.2f}) — downgraded to WATCH", "WATCH"
+        # Differentiated ADX Soft Filter
+        if signal_data.get("signal") == "BUY" and adx is not None:
+            if not is_etf and adx < 20:
+                return False, f"Weak equity trend (ADX {adx:.2f}) — downgraded to WATCH", "WATCH"
+            elif is_etf and adx < 15:
+                return False, f"Flat ETF trend (ADX {adx:.2f}) — downgraded to WATCH", "WATCH"
 
         return True, "Passed all filters", None

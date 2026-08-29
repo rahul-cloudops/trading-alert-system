@@ -95,7 +95,7 @@ class TechnicalAnalyzer:
 
         return df
 
-    def generate_signal(self, df: pd.DataFrame) -> dict:
+    def generate_signal(self, df: pd.DataFrame, ticker: str = "") -> dict:
         if df.empty or len(df) < 50:
             return {"signal": "INSUFFICIENT_DATA", "score": 0, "reasons": []}
 
@@ -103,6 +103,10 @@ class TechnicalAnalyzer:
         prev = df.iloc[-2]
         score = 0
         reasons = []
+
+        # Identify if the asset is an ETF/Commodity for strategy adjustment
+        etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD']
+        is_etf = any(kw in ticker.upper() for kw in etf_keywords)
 
         def safe(val):
             """Return float or None if NaN/missing."""
@@ -130,13 +134,16 @@ class TechnicalAnalyzer:
         if close is None or atr is None:
             return {"signal": "INSUFFICIENT_DATA", "score": 0, "reasons": ["Missing close/ATR"]}
 
-        # EMA trend stack
+        # --- Trend Stack ---
+        # Penalties/Rewards are softened for ETFs to allow accumulating during consolidations
         if all(v is not None for v in [ema20, ema50, ema200]):
             if ema20 > ema50 > ema200:
-                score += 25
+                pts = 15 if is_etf else 25
+                score += pts
                 reasons.append("[+] Bullish EMA stack (20>50>200)")
             elif ema20 < ema50 < ema200:
-                score -= 25
+                pts = 15 if is_etf else 25
+                score -= pts
                 reasons.append("[-] Bearish EMA stack")
 
         if ema20 is not None:
@@ -147,19 +154,22 @@ class TechnicalAnalyzer:
                 score -= 10
                 reasons.append("[-] Price below EMA20")
 
-        # RSI
+        # --- RSI ---
+        # Heavily reward oversold conditions for ETF accumulation
         if rsi is not None:
             if rsi < 35:
-                score += 15
+                pts = 25 if is_etf else 15
+                score += pts
                 reasons.append(f"[+] RSI oversold ({rsi:.1f})")
             elif rsi > 70:
-                score -= 15
+                pts = 10 if is_etf else 15
+                score -= pts
                 reasons.append(f"[-] RSI overbought ({rsi:.1f})")
             else:
                 score += 5
                 reasons.append(f"[~] RSI neutral ({rsi:.1f})")
 
-        # MACD
+        # --- MACD ---
         if all(v is not None for v in [macd, macd_s, p_macd, p_macd_s]):
             if macd > macd_s and p_macd <= p_macd_s:
                 score += 20
@@ -171,7 +181,7 @@ class TechnicalAnalyzer:
                 score -= 10
                 reasons.append("[-] MACD below signal")
 
-        # Volume
+        # --- Volume ---
         if vol_r is not None:
             if vol_r > 1.5:
                 score += 15
@@ -180,21 +190,28 @@ class TechnicalAnalyzer:
                 score -= 10
                 reasons.append("[-] Low volume")
 
-        # ADX
-        if adx is not None and adx > 25:
-            score += 10
-            reasons.append(f"[+] Strong trend (ADX {adx:.1f})")
+        # --- ADX ---
+        # Lower trend momentum requirement for ETFs
+        if adx is not None:
+            if is_etf and adx >= 15:
+                score += 10
+                reasons.append(f"[+] ETF accumulation trend (ADX {adx:.1f})")
+            elif not is_etf and adx >= 25:
+                score += 10
+                reasons.append(f"[+] Strong trend (ADX {adx:.1f})")
 
-        # Bollinger Bands
+        # --- Bollinger Bands ---
+        # Heavily reward lower band touches for ETFs
         if all(v is not None for v in [bb_l, bb_u]):
             if close <= bb_l:
-                score += 15
+                pts = 25 if is_etf else 15
+                score += pts
                 reasons.append("[+] Price at lower Bollinger Band")
             elif close >= bb_u:
-                score -= 15
+                pts = 10 if is_etf else 15
+                score -= pts
                 reasons.append("[-] Price at upper Bollinger Band")
 
-        # Signal classification
         if score >= 55:
             signal = "BUY"
         elif score <= -30:
@@ -213,4 +230,5 @@ class TechnicalAnalyzer:
             "adx":      round(adx, 2)   if adx  is not None else None,
             "close":    round(close, 2),
             "atr":      round(atr, 2),
+            "is_etf":   is_etf,
         }
