@@ -118,13 +118,17 @@ def run_scan():
         for ticker in tickers:
             logger.info(f"  Processing {ticker}...")
             try:
-                # 1. Fetch OHLCV and Fundamentals
+                # 1. Fetch OHLCV
                 df = fetcher.fetch_ohlcv(ticker)
                 if df.empty:
                     continue
                 
-                # Fetch fundamental data (will gracefully handle missing data or ETFs internally)
-                fund_data = fetcher.fetch_fundamentals(ticker)
+                # Identify ETFs to skip fundamental fetching (prevents yfinance timeouts)
+                etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD']
+                is_etf = any(kw in ticker.upper() for kw in etf_keywords)
+                
+                # Fetch fundamental data ONLY for individual equities
+                fund_data = {} if is_etf else fetcher.fetch_fundamentals(ticker)
 
                 # 2. Compute Indicators and Generate Signal using Fundamentals
                 df = ta_engine.compute_indicators(df)
