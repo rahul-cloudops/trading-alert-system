@@ -11,4 +11,3 @@ venv/
 
 # Logs and data
 logs/
-data/trade_log.db
