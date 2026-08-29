@@ -6,13 +6,15 @@ on:
     # Runs Mon–Fri only (markets and AMFI are closed on weekends)
     - cron: '30 13 * * 1-5'
 
-  # Run manually from GitHub Actions UI for testing
   workflow_dispatch:
 
 jobs:
   mf-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Required for the auto-commit action to push changes
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -35,6 +37,12 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python mf_main.py
+
+      - name: Commit database updates
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: save local sqlite mf alerts log [skip ci]"
+          file_pattern: data/*.db
 
       - name: Upload logs on failure
         if: failure()

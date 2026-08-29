@@ -16,6 +16,9 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Required for the auto-commit action to push changes
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -25,7 +28,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-          cache: 'pip'           # caches pip downloads — faster subsequent runs
+          cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
@@ -43,6 +46,12 @@ jobs:
           MAX_POSITIONS: "5"
           SWING_LOOKBACK_DAYS: "90"
         run: python main.py
+
+      - name: Commit database updates
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: save local sqlite trade log [skip ci]"
+          file_pattern: data/*.db
 
       - name: Upload logs on failure
         if: failure()
