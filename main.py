@@ -118,16 +118,22 @@ def run_scan():
         for ticker in tickers:
             logger.info(f"  Processing {ticker}...")
             try:
+                # 1. Fetch OHLCV and Fundamentals
                 df = fetcher.fetch_ohlcv(ticker)
                 if df.empty:
                     continue
+                
+                # Fetch fundamental data (will gracefully handle missing data or ETFs internally)
+                fund_data = fetcher.fetch_fundamentals(ticker)
 
+                # 2. Compute Indicators and Generate Signal using Fundamentals
                 df = ta_engine.compute_indicators(df)
-                signal_data = ta_engine.generate_signal(df, ticker)
+                signal_data = ta_engine.generate_signal(df, ticker, fundamentals=fund_data)
 
                 if signal_data['signal'] in ('HOLD', 'INSUFFICIENT_DATA'):
                     continue
 
+                # 3. Calculate Risk Levels
                 risk_data = risk_mgr.calculate_levels(
                     current_price=signal_data['close'],
                     atr=signal_data['atr'],

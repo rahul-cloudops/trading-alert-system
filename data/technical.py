@@ -95,7 +95,7 @@ class TechnicalAnalyzer:
 
         return df
 
-    def generate_signal(self, df: pd.DataFrame, ticker: str = "") -> dict:
+    def generate_signal(self, df: pd.DataFrame, ticker: str = "", fundamentals: dict = None) -> dict:
         if df.empty or len(df) < 50:
             return {"signal": "INSUFFICIENT_DATA", "score": 0, "reasons": []}
 
@@ -105,7 +105,7 @@ class TechnicalAnalyzer:
         reasons = []
 
         # Identify if the asset is an ETF/Commodity for strategy adjustment
-        etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD']
+        etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD']
         is_etf = any(kw in ticker.upper() for kw in etf_keywords)
 
         def safe(val):
@@ -135,7 +135,6 @@ class TechnicalAnalyzer:
             return {"signal": "INSUFFICIENT_DATA", "score": 0, "reasons": ["Missing close/ATR"]}
 
         # --- Trend Stack ---
-        # Penalties/Rewards are softened for ETFs to allow accumulating during consolidations
         if all(v is not None for v in [ema20, ema50, ema200]):
             if ema20 > ema50 > ema200:
                 pts = 15 if is_etf else 25
@@ -155,7 +154,6 @@ class TechnicalAnalyzer:
                 reasons.append("[-] Price below EMA20")
 
         # --- RSI ---
-        # Heavily reward oversold conditions for ETF accumulation
         if rsi is not None:
             if rsi < 35:
                 pts = 25 if is_etf else 15
@@ -191,7 +189,6 @@ class TechnicalAnalyzer:
                 reasons.append("[-] Low volume")
 
         # --- ADX ---
-        # Lower trend momentum requirement for ETFs
         if adx is not None:
             if is_etf and adx >= 15:
                 score += 10
@@ -201,7 +198,6 @@ class TechnicalAnalyzer:
                 reasons.append(f"[+] Strong trend (ADX {adx:.1f})")
 
         # --- Bollinger Bands ---
-        # Heavily reward lower band touches for ETFs
         if all(v is not None for v in [bb_l, bb_u]):
             if close <= bb_l:
                 pts = 25 if is_etf else 15
@@ -212,6 +208,40 @@ class TechnicalAnalyzer:
                 score -= pts
                 reasons.append("[-] Price at upper Bollinger Band")
 
+        # --- Fundamental Analysis (Equities Only) ---
+        if not is_etf and fundamentals:
+            pe = safe(fundamentals.get("pe_ratio"))
+            roe = safe(fundamentals.get("roe"))
+            de = safe(fundamentals.get("debt_to_equity"))
+            
+            # ROE (yfinance returns as a decimal, e.g., 0.15 = 15%)
+            if roe is not None:
+                if roe > 0.15:
+                    score += 10
+                    reasons.append(f"[+] Strong ROE ({roe*100:.1f}%)")
+                elif roe < 0.05:
+                    score -= 10
+                    reasons.append(f"[-] Weak ROE ({roe*100:.1f}%)")
+                    
+            # Debt to Equity (yfinance returns as a percentage, e.g., 150 = 1.5x)
+            if de is not None:
+                if de < 50:
+                    score += 10
+                    reasons.append(f"[+] Low Debt/Equity ({de:.1f})")
+                elif de > 200:
+                    score -= 10
+                    reasons.append(f"[-] High Debt/Equity ({de:.1f})")
+
+            # P/E Ratio
+            if pe is not None:
+                if 0 < pe < 20:
+                    score += 10
+                    reasons.append(f"[+] Value P/E ({pe:.1f})")
+                elif pe > 50:
+                    score -= 10
+                    reasons.append(f"[-] High P/E Valuation ({pe:.1f})")
+
+        # --- Signal Classification ---
         if score >= 55:
             signal = "BUY"
         elif score <= -30:
