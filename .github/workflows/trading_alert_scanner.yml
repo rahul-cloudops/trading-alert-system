@@ -52,6 +52,7 @@ jobs:
         with:
           commit_message: "chore: save local sqlite trade log [skip ci]"
           file_pattern: data/*.db
+          add_options: "-f"
 
       - name: Upload logs on failure
         if: failure()

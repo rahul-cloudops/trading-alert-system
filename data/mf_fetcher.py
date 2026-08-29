@@ -3,13 +3,11 @@ mf_fetcher.py
 -------------
 Fetches NAV history for Indian Mutual Funds using the free mfapi.in API.
 No API key required. Data is updated daily by AMFI.
-
-API base: https://api.mfapi.in
-  GET /mf/{scheme_code}         -> full NAV history
-  GET /mf/{scheme_code}/latest  -> latest NAV only
 """
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 import logging
 from datetime import datetime, timedelta
@@ -17,10 +15,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Scheme codes from mfapi.in  (verified against AMFI registry)
-# To find a code for any fund: https://api.mfapi.in/mf/search?q=<fund+name>
-# ---------------------------------------------------------------------------
 FUND_REGISTRY = {
     # ── Your current holdings ──────────────────────────────────────────────
     "HDFC_MIDCAP": {
@@ -28,7 +22,7 @@ FUND_REGISTRY = {
         "name": "HDFC Mid Cap Fund - Growth Option - Direct Plan",
         "category": "Mid Cap",
         "benchmark_index": "NIFTY_MIDCAP150",
-        "correction_threshold_pct": 15,   # trigger lumpsum alert at 15% dip
+        "correction_threshold_pct": 15,   
     },
     "NIPPON_LARGECAP": {
         "scheme_code": 118632,
@@ -49,7 +43,7 @@ FUND_REGISTRY = {
         "name": "BANDHAN SMALL CAP FUND - DIRECT PLAN GROWTH",
         "category": "Small Cap",
         "benchmark_index": "NIFTY_SMALLCAP250",
-        "correction_threshold_pct": 20,   # small caps need deeper correction
+        "correction_threshold_pct": 20,   
     },
 
     # ── Watchlist / recommended funds ─────────────────────────────────────
@@ -79,17 +73,26 @@ FUND_REGISTRY = {
 BASE_URL = "https://api.mfapi.in"
 TIMEOUT  = 15   # seconds
 
-
 class MFDataFetcher:
-    """Fetches and processes NAV data from mfapi.in."""
+    """Fetches and processes NAV data from mfapi.in with connection resiliency."""
 
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": "TradingAlertBot/1.0"})
-
-    # ------------------------------------------------------------------ #
-    #  Core fetch methods                                                  #
-    # ------------------------------------------------------------------ #
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        })
+        
+        # Configure exponential backoff for connection pooling
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=2,  # Sleeps for 2, 4, 8 seconds between retries
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
 
     def fetch_latest_nav(self, scheme_code: int) -> Optional[dict]:
         """Return the latest NAV dict: {date, nav}."""
@@ -105,7 +108,7 @@ class MFDataFetcher:
                     "nav":  float(entry["nav"]),
                 }
         except Exception as e:
-            logger.error(f"Failed latest NAV for {scheme_code}: {e}")
+            logger.error(f"❌ Failed latest NAV for {scheme_code} after retries: {e}")
         return None
 
     def fetch_nav_history(
@@ -113,10 +116,7 @@ class MFDataFetcher:
         scheme_code: int,
         lookback_days: int = 365,
     ) -> pd.DataFrame:
-        """
-        Return a DataFrame with columns [date, nav] sorted ascending.
-        lookback_days controls how far back we go (default 1 year).
-        """
+        """Return a DataFrame with columns [date, nav] sorted ascending."""
         url = f"{BASE_URL}/mf/{scheme_code}"
         try:
             resp = self.session.get(url, timeout=TIMEOUT)
@@ -124,38 +124,28 @@ class MFDataFetcher:
             data = resp.json()
 
             if data.get("status") != "SUCCESS" or not data.get("data"):
-                logger.warning(f"No history data for scheme {scheme_code}")
+                logger.warning(f"⚠️ No history data for scheme {scheme_code}")
                 return pd.DataFrame()
 
-            df = pd.DataFrame(data["data"])              # columns: date, nav
+            df = pd.DataFrame(data["data"])
             df["date"] = pd.to_datetime(df["date"], format="%d-%m-%Y")
             df["nav"]  = pd.to_numeric(df["nav"], errors="coerce")
             df.dropna(subset=["nav"], inplace=True)
             df.sort_values("date", inplace=True)
             df.reset_index(drop=True, inplace=True)
 
-            # Trim to lookback window
             cutoff = datetime.today() - timedelta(days=lookback_days)
             df = df[df["date"] >= cutoff].copy()
 
-            logger.info(
-                f"Fetched {len(df)} NAV records for scheme {scheme_code}"
-            )
+            logger.info(f"✅ Fetched {len(df)} NAV records for scheme {scheme_code}")
             return df
 
         except Exception as e:
-            logger.error(f"Failed NAV history for {scheme_code}: {e}")
+            logger.error(f"❌ Failed NAV history for {scheme_code} after retries: {e}")
             return pd.DataFrame()
 
-    # ------------------------------------------------------------------ #
-    #  Convenience batch fetch                                             #
-    # ------------------------------------------------------------------ #
-
     def fetch_all_funds(self, lookback_days: int = 365) -> dict:
-        """
-        Fetch NAV history for every fund in FUND_REGISTRY.
-        Returns {fund_key: DataFrame}.
-        """
+        """Fetch NAV history for every fund in FUND_REGISTRY."""
         results = {}
         for key, meta in FUND_REGISTRY.items():
             logger.info(f"Fetching NAV history: {meta['name']}")
@@ -163,5 +153,5 @@ class MFDataFetcher:
             if not df.empty:
                 results[key] = df
             else:
-                logger.warning(f"Skipping {key} — no data returned")
+                logger.warning(f"⚠️ Skipping {key} — no data returned")
         return results
