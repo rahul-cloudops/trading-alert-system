@@ -119,7 +119,7 @@ def run_mf_scan():
 
     for fund_key, meta in FUND_REGISTRY.items():
         logger.info(f"Processing: {meta['name']}")
-        df = fetcher.fetch_nav_history(meta["scheme_code"], lookback_days=400)
+        df = fetcher.fetch_nav_history(meta["scheme_code"], meta["yfinance_ticker"], lookback_days=400)
 
         if df.empty:
             logger.warning(f"  Skipping {fund_key} — no NAV data")
