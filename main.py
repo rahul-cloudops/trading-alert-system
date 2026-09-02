@@ -90,25 +90,54 @@ def run_scan():
                                risk_per_trade_pct=2.0, max_positions=5)
 
     all_results = []
+    pending_alerts = [] # Initialize queue for batch dispatch
 
     for market, tickers, risk_mgr in [
         ("IN", config['indian_stocks'], risk_mgr_in),
         ("US", config['us_stocks'], risk_mgr_us)
     ]:
         logger.info(f"Scanning {market} market — {len(tickers)} stocks")
+        
+        # --- MACRO REGIME CHECK ---
+        index_ticker = "^NSEI" if market == "IN" else "^GSPC"
+        idx_df = fetcher.fetch_ohlcv(index_ticker)
+        
+        if not idx_df.empty and len(idx_df) >= 50:
+            current_idx_close = float(idx_df['Close'].iloc[-1])
+            idx_50_dma = float(idx_df['Close'].rolling(50).mean().iloc[-1])
+            is_bull_market = current_idx_close > idx_50_dma
+            
+            risk_mgr.set_market_regime(is_bull_market)
+            regime_str = "BULL" if is_bull_market else "BEAR (Risk halved, strict filters)"
+            logger.info(f"  Macro Regime [{index_ticker}]: {regime_str} (Close: {current_idx_close:.2f}, 50-DMA: {idx_50_dma:.2f})")
+        else:
+            logger.warning(f"  Could not compute regime for {index_ticker}. Defaulting to BULL.")
+            risk_mgr.set_market_regime(True)
+        # --------------------------
+
         for ticker in tickers:
             logger.info(f"  Processing {ticker}...")
             try:
+                # 1. Fetch OHLCV
                 df = fetcher.fetch_ohlcv(ticker)
                 if df.empty:
                     continue
+                
+                # Identify ETFs to skip fundamental fetching (prevents yfinance timeouts)
+                etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD']
+                is_etf = any(kw in ticker.upper() for kw in etf_keywords)
+                
+                # Fetch fundamental data ONLY for individual equities
+                fund_data = {} if is_etf else fetcher.fetch_fundamentals(ticker)
 
+                # 2. Compute Indicators and Generate Signal using Fundamentals
                 df = ta_engine.compute_indicators(df)
-                signal_data = ta_engine.generate_signal(df)
+                signal_data = ta_engine.generate_signal(df, ticker, fundamentals=fund_data)
 
                 if signal_data['signal'] in ('HOLD', 'INSUFFICIENT_DATA'):
                     continue
 
+                # 3. Calculate Risk Levels
                 risk_data = risk_mgr.calculate_levels(
                     current_price=signal_data['close'],
                     atr=signal_data['atr'],
@@ -120,8 +149,6 @@ def run_scan():
 
                 if not approved:
                     logger.info(f"    Filtered out: {reason}")
-                    
-                    # If downgraded to WATCH, still add to summary — don't drop entirely
                     if downgrade == "WATCH":
                         signal_data["signal"] = "WATCH"
                         all_results.append({**signal_data, "ticker": ticker, "market": market})
@@ -130,7 +157,6 @@ def run_scan():
                 company = TICKER_NAMES.get(ticker, ticker.replace(".NS", ""))
                 sent_data = sentiment.get_stock_sentiment(ticker, company, market)
 
-                # Boost/reduce score based on sentiment
                 if sent_data['label'] == 'POSITIVE' and signal_data['signal'] == 'BUY':
                     signal_data['score'] = min(100, signal_data['score'] + 10)
                 elif sent_data['label'] == 'NEGATIVE' and signal_data['signal'] == 'BUY':
@@ -140,12 +166,17 @@ def run_scan():
 
                 if signal_data['signal'] in ('BUY', 'SELL'):
                     message = alerter.format_alert(ticker, signal_data, risk_data, sent_data, market)
-                    alerter.send_alert(message)
+                    pending_alerts.append(message) # Queue the message instead of sending immediately
                     log_alert(db_conn, ticker, market, signal_data, risk_data, sent_data)
-                    logger.info(f"    ✅ Alert sent for {ticker}: {signal_data['signal']}")
+                    logger.info(f"    ✅ Alert queued for {ticker}: {signal_data['signal']}")
 
             except Exception as e:
                 logger.error(f"    ❌ Error processing {ticker}: {e}")
+
+    # Dispatch all queued alerts concurrently after the scan finishes
+    if pending_alerts:
+        logger.info(f"Dispatching {len(pending_alerts)} alerts to Telegram...")
+        alerter.send_alerts_batch(pending_alerts)
 
     alerter.send_daily_summary(all_results)
     logger.info("Scan complete.")

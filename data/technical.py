@@ -95,7 +95,7 @@ class TechnicalAnalyzer:
 
         return df
 
-    def generate_signal(self, df: pd.DataFrame) -> dict:
+    def generate_signal(self, df: pd.DataFrame, ticker: str = "", fundamentals: dict = None) -> dict:
         if df.empty or len(df) < 50:
             return {"signal": "INSUFFICIENT_DATA", "score": 0, "reasons": []}
 
@@ -103,6 +103,10 @@ class TechnicalAnalyzer:
         prev = df.iloc[-2]
         score = 0
         reasons = []
+
+        # Identify if the asset is an ETF/Commodity for strategy adjustment
+        etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD']
+        is_etf = any(kw in ticker.upper() for kw in etf_keywords)
 
         def safe(val):
             """Return float or None if NaN/missing."""
@@ -130,13 +134,15 @@ class TechnicalAnalyzer:
         if close is None or atr is None:
             return {"signal": "INSUFFICIENT_DATA", "score": 0, "reasons": ["Missing close/ATR"]}
 
-        # EMA trend stack
+        # --- Trend Stack ---
         if all(v is not None for v in [ema20, ema50, ema200]):
             if ema20 > ema50 > ema200:
-                score += 25
+                pts = 15 if is_etf else 25
+                score += pts
                 reasons.append("[+] Bullish EMA stack (20>50>200)")
             elif ema20 < ema50 < ema200:
-                score -= 25
+                pts = 15 if is_etf else 25
+                score -= pts
                 reasons.append("[-] Bearish EMA stack")
 
         if ema20 is not None:
@@ -147,19 +153,21 @@ class TechnicalAnalyzer:
                 score -= 10
                 reasons.append("[-] Price below EMA20")
 
-        # RSI
+        # --- RSI ---
         if rsi is not None:
             if rsi < 35:
-                score += 15
+                pts = 25 if is_etf else 15
+                score += pts
                 reasons.append(f"[+] RSI oversold ({rsi:.1f})")
             elif rsi > 70:
-                score -= 15
+                pts = 10 if is_etf else 15
+                score -= pts
                 reasons.append(f"[-] RSI overbought ({rsi:.1f})")
             else:
                 score += 5
                 reasons.append(f"[~] RSI neutral ({rsi:.1f})")
 
-        # MACD
+        # --- MACD ---
         if all(v is not None for v in [macd, macd_s, p_macd, p_macd_s]):
             if macd > macd_s and p_macd <= p_macd_s:
                 score += 20
@@ -171,7 +179,7 @@ class TechnicalAnalyzer:
                 score -= 10
                 reasons.append("[-] MACD below signal")
 
-        # Volume
+        # --- Volume ---
         if vol_r is not None:
             if vol_r > 1.5:
                 score += 15
@@ -180,21 +188,60 @@ class TechnicalAnalyzer:
                 score -= 10
                 reasons.append("[-] Low volume")
 
-        # ADX
-        if adx is not None and adx > 25:
-            score += 10
-            reasons.append(f"[+] Strong trend (ADX {adx:.1f})")
+        # --- ADX ---
+        if adx is not None:
+            if is_etf and adx >= 15:
+                score += 10
+                reasons.append(f"[+] ETF accumulation trend (ADX {adx:.1f})")
+            elif not is_etf and adx >= 25:
+                score += 10
+                reasons.append(f"[+] Strong trend (ADX {adx:.1f})")
 
-        # Bollinger Bands
+        # --- Bollinger Bands ---
         if all(v is not None for v in [bb_l, bb_u]):
             if close <= bb_l:
-                score += 15
+                pts = 25 if is_etf else 15
+                score += pts
                 reasons.append("[+] Price at lower Bollinger Band")
             elif close >= bb_u:
-                score -= 15
+                pts = 10 if is_etf else 15
+                score -= pts
                 reasons.append("[-] Price at upper Bollinger Band")
 
-        # Signal classification
+        # --- Fundamental Analysis (Equities Only) ---
+        if not is_etf and fundamentals:
+            pe = safe(fundamentals.get("pe_ratio"))
+            roe = safe(fundamentals.get("roe"))
+            de = safe(fundamentals.get("debt_to_equity"))
+            
+            # ROE (yfinance returns as a decimal, e.g., 0.15 = 15%)
+            if roe is not None:
+                if roe > 0.15:
+                    score += 10
+                    reasons.append(f"[+] Strong ROE ({roe*100:.1f}%)")
+                elif roe < 0.05:
+                    score -= 10
+                    reasons.append(f"[-] Weak ROE ({roe*100:.1f}%)")
+                    
+            # Debt to Equity (yfinance returns as a percentage, e.g., 150 = 1.5x)
+            if de is not None:
+                if de < 50:
+                    score += 10
+                    reasons.append(f"[+] Low Debt/Equity ({de:.1f})")
+                elif de > 200:
+                    score -= 10
+                    reasons.append(f"[-] High Debt/Equity ({de:.1f})")
+
+            # P/E Ratio
+            if pe is not None:
+                if 0 < pe < 20:
+                    score += 10
+                    reasons.append(f"[+] Value P/E ({pe:.1f})")
+                elif pe > 50:
+                    score -= 10
+                    reasons.append(f"[-] High P/E Valuation ({pe:.1f})")
+
+        # --- Signal Classification ---
         if score >= 55:
             signal = "BUY"
         elif score <= -30:
@@ -213,4 +260,5 @@ class TechnicalAnalyzer:
             "adx":      round(adx, 2)   if adx  is not None else None,
             "close":    round(close, 2),
             "atr":      round(atr, 2),
+            "is_etf":   is_etf,
         }

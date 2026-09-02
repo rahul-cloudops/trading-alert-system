@@ -2,6 +2,9 @@ import asyncio
 import telegram
 import os
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class TelegramAlerter:
     def __init__(self):
@@ -48,6 +51,27 @@ class TelegramAlerter:
 _This is an AI advisory alert. Trade at your own risk._
         """
         return msg.strip()
+
+    async def send_batch_async(self, messages: list[str]):
+        """Send multiple messages in a single async session to avoid loop overhead and rate limits."""
+        if not messages:
+            return
+        
+        async with self.bot:
+            for msg in messages:
+                try:
+                    await self.bot.send_message(
+                        chat_id=self.chat_id,
+                        text=msg,
+                        parse_mode='Markdown'
+                    )
+                    await asyncio.sleep(0.2)  # Throttle to respect Telegram limits
+                except Exception as e:
+                    logger.error(f"Telegram batch send error: {e}")
+
+    def send_alerts_batch(self, messages: list[str]):
+        """Synchronous wrapper for batch sending."""
+        asyncio.run(self.send_batch_async(messages))
 
     async def send_alert_async(self, message: str):
         async with self.bot:
