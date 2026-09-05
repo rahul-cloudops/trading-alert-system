@@ -17,6 +17,12 @@ class TelegramAlerter:
         signal = signal_data['signal']
         emoji  = "🟢" if signal == "BUY" else "🔴" if signal == "SELL" else "🟡"
         sent_emoji = "😊" if sentiment['label'] == "POSITIVE" else "😟" if sentiment['label'] == "NEGATIVE" else "😐"
+        
+        is_etf = signal_data.get("is_etf", False)
+        
+        # Dynamically display Stop Loss requirements
+        sl_display = f"{risk_data['stop_loss']} ({risk_data['sl_percent']}% risk)" if not is_etf else "None (Long-Term Accumulation)"
+        action_msg = "Set SL immediately after entry." if not is_etf else "ETF holding. No Stop Loss required."
 
         msg = f"""
 {emoji} *TRADING ALERT — {signal}*
@@ -26,7 +32,7 @@ class TelegramAlerter:
 💰 *Entry Price:* ₹{risk_data['entry_price'] if market == 'IN' else '$'}{risk_data['entry_price']}
 
 🎯 *TRADE LEVELS*
-  • Stop Loss:    {risk_data['stop_loss']} ({risk_data['sl_percent']}% risk)
+  • Stop Loss:    {sl_display}
   • Take Profit 1: {risk_data['take_profit_1']} (50% exit)
   • Take Profit 2: {risk_data['take_profit_2']} (full exit)
   • Risk/Reward:  {risk_data['risk_reward_ratio']}:1
@@ -46,7 +52,7 @@ class TelegramAlerter:
 
 ⚠️ *ACTION REQUIRED:*
   Open {'Groww' if market == 'IN' else 'IndMoney'} and execute manually.
-  Set SL immediately after entry.
+  {action_msg}
 
 _This is an AI advisory alert. Trade at your own risk._
         """
