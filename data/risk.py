@@ -9,10 +9,9 @@ class RiskManager:
         """Update the macro market regime before scanning."""
         self.is_bull_market = is_bull_market
 
-    def calculate_levels(self, current_price: float, atr: float, signal: str, is_etf: bool = False, leverage_factor: float = 1.0) -> dict:
+    def calculate_levels(self, current_price: float, atr: float, signal: str, is_etf: bool = False, leverage_factor: float = 1.0, allow_fractional: bool = False) -> dict:
         """ATR-based dynamic levels with ETF override and leverage scaling."""
         
-        # Scale the ATR distance based on the asset's leverage multiplier
         atr_multiplier_sl = 1.5 * leverage_factor
         atr_multiplier_tp1 = 2.0 * leverage_factor
         atr_multiplier_tp2 = 3.5 * leverage_factor
@@ -27,14 +26,13 @@ class RiskManager:
             take_profit2 = current_price - (atr * atr_multiplier_tp2)
 
         risk_per_share = abs(current_price - tech_sl)
-        
         actual_risk_pct = self.risk_per_trade_pct if self.is_bull_market else (self.risk_per_trade_pct / 2)
-        position_size = self.calculate_position_size(risk_per_share, current_price, actual_risk_pct)
+        
+        # Pass the fractional flag to the sizing calculator
+        position_size = self.calculate_position_size(risk_per_share, current_price, actual_risk_pct, allow_fractional)
         
         risk_reward = round(abs(take_profit2 - current_price) / risk_per_share, 2) if risk_per_share > 0 else 0
 
-        # --- ETF Accumulation Override ---
-        # Leveraged ETFs MUST retain their stop-loss to prevent decay destruction
         if is_etf and leverage_factor == 1.0:
             final_sl = 0.0  
             sl_percent = 0.0
@@ -54,20 +52,24 @@ class RiskManager:
             "sl_percent": sl_percent,
         }
 
-    def calculate_position_size(self, risk_per_share: float, current_price: float, actual_risk_pct: float) -> int:
+    def calculate_position_size(self, risk_per_share: float, current_price: float, actual_risk_pct: float, allow_fractional: bool = False) -> float:
         """Position sizing based on dynamically adjusted % capital risk and 20% portfolio limits."""
         if risk_per_share <= 0 or current_price <= 0:
-            return 0
+            return 0.0
             
-        # 1. Units allowed based on risk budget
         max_loss = self.capital * (actual_risk_pct / 100)
-        units_by_risk = int(max_loss / risk_per_share)
+        units_by_risk = max_loss / risk_per_share
         
-        # 2. Units allowed based on total portfolio concentration (Max 20% capital in one asset)
         max_position_value = self.capital * 0.20
-        max_units_by_value = int(max_position_value / current_price)
+        max_units_by_value = max_position_value / current_price
         
-        return min(units_by_risk, max_units_by_value)
+        raw_units = min(units_by_risk, max_units_by_value)
+        
+        # Return 4 decimal places for US stocks, or whole integers for Indian stocks
+        if allow_fractional:
+            return round(raw_units, 4)
+        else:
+            return float(int(raw_units))
 
     def apply_filters(self, signal_data: dict) -> tuple[bool, str, str]:
         """Returns (approved, reason, downgrade_signal)"""

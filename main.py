@@ -129,7 +129,7 @@ def run_scan():
                 df = fetcher.fetch_ohlcv(ticker)
                 if df.empty:
                     continue
-                
+
                 # Identify ETFs to skip fundamental fetching (prevents yfinance timeouts)
                 etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD', 'SOXL']
                 is_etf = any(kw in ticker.upper() for kw in etf_keywords)
@@ -153,7 +153,8 @@ def run_scan():
                     atr=signal_data['atr'],
                     signal=signal_data['signal'],
                     is_etf=signal_data.get('is_etf', False),
-                    leverage_factor=lev_factor
+                    leverage_factor=lev_factor,
+                    allow_fractional=(market == "US")
                 )
 
                 signal_data.update(risk_data)

@@ -21,11 +21,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Backtester")
 
+LEVERAGE_MAP = {
+    "SOXL": 3.0,
+    "USD": 2.0,
+    "TQQQ": 3.0,
+    "UPRO": 3.0
+}
+
+ETF_KEYWORDS = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD', 'SOXL']
+
 
 class Position:
     def __init__(self, ticker: str, market: str, entry_date: pd.Timestamp, 
                  entry_price: float, units: int, stop_loss: float, 
-                 tp1: float, tp2: float, risk_per_share: float):
+                 tp1: float, tp2: float, risk_per_share: float, is_etf: bool = False):
         self.ticker = ticker
         self.market = market
         self.entry_date = entry_date
@@ -36,6 +45,7 @@ class Position:
         self.tp1 = tp1
         self.tp2 = tp2
         self.risk_per_share = risk_per_share
+        self.is_etf = is_etf
         self.tp1_hit = False
         self.realized_pnl = 0.0
         self.closed = False
@@ -51,18 +61,21 @@ class BacktestEngine:
         self.lookback_days = lookback_days
         self.fetcher = MarketDataFetcher(lookback_days=lookback_days)
         self.ta = TechnicalAnalyzer()
-        
-        # Sizing and risk constraints
         self.max_positions = 5
-        self.risk_per_trade_pct = 2.0
 
     def run(self, market: str = "IN") -> dict:
         tickers = self.config['indian_stocks'] if market == "IN" else self.config['us_stocks']
         initial_capital = float(self.config['portfolio_capital_inr'] if market == "IN" else self.config['portfolio_capital_usd'])
         
-        logger.info(f"Loading {len(tickers)} assets for {market} backtest over {self.lookback_days} days...")
+        # 1. Fetch & prep Macro Benchmark for walk-forward regime check
+        index_ticker = "^NSEI" if market == "IN" else "^GSPC"
+        logger.info(f"Loading Macro Index ({index_ticker}) for regime detection...")
+        idx_df = self.fetcher.fetch_ohlcv(index_ticker)
+        if not idx_df.empty:
+            idx_df['SMA_50'] = idx_df['Close'].rolling(50).mean()
 
-        # 1. Fetch & prep OHLCV data
+        # 2. Fetch & prep OHLCV data for watchlist assets
+        logger.info(f"Loading {len(tickers)} assets for {market} backtest over {self.lookback_days} days...")
         data_store = {}
         for ticker in tickers:
             df = self.fetcher.fetch_ohlcv(ticker)
@@ -74,7 +87,7 @@ class BacktestEngine:
             logger.error("No valid historical data retrieved.")
             return {}
 
-        # 2. Synchronize chronological date index across assets
+        # 3. Synchronize chronological date index across assets
         all_dates = sorted(list(set(d for df in data_store.values() for d in df.index)))
         
         cash = initial_capital
@@ -82,17 +95,26 @@ class BacktestEngine:
         trade_history: list[dict] = []
         portfolio_equity_curve = []
 
+        # Market-specific risk configuration (2% IN, 10% US due to micro-capital limits)
+        risk_pct = 2.0 if market == "IN" else 10.0
         risk_mgr = RiskManager(
             capital=initial_capital,
-            risk_per_trade_pct=self.risk_per_trade_pct,
+            risk_per_trade_pct=risk_pct,
             max_positions=self.max_positions
         )
 
         logger.info(f"Running simulation from {all_dates[50].date()} to {all_dates[-1].date()}...")
 
-        # 3. Bar-by-bar walk-forward simulation
+        # 4. Bar-by-bar walk-forward simulation
         for i in range(50, len(all_dates)):
             current_date = all_dates[i]
+
+            # --- Update Macro Regime Bar-by-Bar ---
+            if not idx_df.empty and current_date in idx_df.index:
+                idx_bar = idx_df.loc[current_date]
+                if pd.notna(idx_bar.get('Close')) and pd.notna(idx_bar.get('SMA_50')):
+                    is_bull = bool(idx_bar['Close'] > idx_bar['SMA_50'])
+                    risk_mgr.set_market_regime(is_bull)
             
             # --- Portfolio Mark-to-Market ---
             current_equity = cash
@@ -110,7 +132,7 @@ class BacktestEngine:
                 "open_positions": len(active_positions)
             })
 
-            # Sync risk manager capital with portfolio value
+            # Sync risk manager capital dynamically
             risk_mgr.capital = current_equity
 
             # --- Check Exits on Open Positions ---
@@ -125,8 +147,8 @@ class BacktestEngine:
                 high = bar['High']
                 low = bar['Low']
 
-                # 1. Stop Loss Evaluation
-                if low <= pos.stop_loss:
+                # 1. Stop Loss Evaluation (bypassed if stop_loss == 0.0 for accumulation ETFs)
+                if pos.stop_loss > 0.0 and low <= pos.stop_loss:
                     exit_price = pos.stop_loss
                     pnl = (exit_price - pos.entry_price) * pos.remaining_units
                     cash += pos.remaining_units * exit_price
@@ -138,7 +160,7 @@ class BacktestEngine:
                     trade_history.append(self._record_trade(pos))
                     continue
 
-                # 2. Take Profit 1 (Scale out 50% + Move SL to Entry)
+                # 2. Take Profit 1 (Scale out 50% + Move SL to Entry for non-ETFs)
                 if not pos.tp1_hit and high >= pos.tp1:
                     units_to_sell = pos.remaining_units // 2
                     if units_to_sell > 0:
@@ -147,7 +169,10 @@ class BacktestEngine:
                         pos.realized_pnl += pnl
                         pos.remaining_units -= units_to_sell
                         pos.tp1_hit = True
-                        pos.stop_loss = pos.entry_price  # Move SL to Breakeven
+                        
+                        # Only move SL to breakeven if the position actively uses a stop-loss
+                        if pos.stop_loss > 0.0:
+                            pos.stop_loss = pos.entry_price
 
                 # 3. Take Profit 2 (Close remaining 50%)
                 if pos.tp1_hit and high >= pos.tp2:
@@ -172,7 +197,6 @@ class BacktestEngine:
                     if current_date not in df.index:
                         continue
                     
-                    # Avoid duplicate positions in the same stock
                     if any(pos.ticker == ticker for pos in active_positions):
                         continue
 
@@ -180,14 +204,21 @@ class BacktestEngine:
                     if len(sub_df) < 50:
                         continue
 
+                    is_etf = any(kw in ticker.upper() for kw in ETF_KEYWORDS)
+                    lev_factor = LEVERAGE_MAP.get(ticker, 1.0)
+
                     # Generate signal with production logic
                     signal_data = self.ta.generate_signal(sub_df, ticker=ticker, fundamentals={})
 
                     if signal_data['signal'] == 'BUY':
+                        # 3. Calculate Risk Levels
                         risk_data = risk_mgr.calculate_levels(
                             current_price=signal_data['close'],
                             atr=signal_data['atr'],
-                            signal='BUY'
+                            signal=signal_data['signal'],
+                            is_etf=signal_data.get('is_etf', False),
+                            leverage_factor=lev_factor,
+                            allow_fractional=(market == "US")  # <--- Add this flag
                         )
                         signal_data.update(risk_data)
                         
@@ -206,12 +237,35 @@ class BacktestEngine:
                                 stop_loss=risk_data['stop_loss'],
                                 tp1=risk_data['take_profit_1'],
                                 tp2=risk_data['take_profit_2'],
-                                risk_per_share=risk_data['risk_per_share']
+                                risk_per_share=risk_data['risk_per_share'],
+                                is_etf=is_etf
                             )
                             active_positions.append(new_pos)
                             
                             if len(active_positions) >= self.max_positions:
                                 break
+
+        last_date = all_dates[-1]
+        for pos in active_positions:
+            df = data_store[pos.ticker]
+            
+            # Fetch the final available closing price
+            if last_date in df.index:
+                last_price = df.loc[last_date, 'Close']
+            else:
+                last_price = pos.entry_price
+            
+            # Calculate final unrealized PnL and add to any partially realized PnL (from TP1)
+            pnl = (last_price - pos.entry_price) * pos.remaining_units
+            pos.realized_pnl += pnl
+            pos.remaining_units = 0
+            pos.closed = True
+            pos.exit_date = last_date
+            pos.exit_reason = "Open Position (Mark-to-Market)"
+            
+            trade_history.append(self._record_trade(pos))
+            
+        active_positions.clear()
 
         return self._generate_report(initial_capital, portfolio_equity_curve, trade_history, market)
 
@@ -237,12 +291,10 @@ class BacktestEngine:
         net_profit = final_equity - initial_capital
         total_return_pct = (net_profit / initial_capital) * 100
 
-        # Maximum Drawdown calculation
         eq_df['peak'] = eq_df['equity'].cummax()
         eq_df['drawdown'] = (eq_df['equity'] - eq_df['peak']) / eq_df['peak']
         max_drawdown_pct = abs(eq_df['drawdown'].min()) * 100
 
-        # Trade metrics
         total_trades = len(trades)
         wins = [t for t in trades if t['pnl'] > 0]
         losses = [t for t in trades if t['pnl'] <= 0]
