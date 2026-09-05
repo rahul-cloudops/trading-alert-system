@@ -84,13 +84,20 @@ def run_scan():
     alerter   = TelegramAlerter()
     db_conn   = init_db()
 
-    risk_mgr_in = RiskManager(capital=config['portfolio_capital_inr'],
-                               risk_per_trade_pct=2.0, max_positions=5)
-    risk_mgr_us = RiskManager(capital=config['portfolio_capital_usd'],
-                               risk_per_trade_pct=2.0, max_positions=5)
+    # Set Indian market to conservative 2%, US market to 10% due to micro-capital limits
+    risk_mgr_in = RiskManager(capital=config['portfolio_capital_inr'], risk_per_trade_pct=2.0, max_positions=5)
+    risk_mgr_us = RiskManager(capital=config['portfolio_capital_usd'], risk_per_trade_pct=10.0, max_positions=5)
 
     all_results = []
-    pending_alerts = [] # Initialize queue for batch dispatch
+    pending_alerts = []
+
+    # Map leveraged ETFs to their respective multipliers
+    LEVERAGE_MAP = {
+        "SOXL": 3.0,
+        "USD": 2.0,
+        "TQQQ": 3.0,
+        "UPRO": 3.0
+    }
 
     for market, tickers, risk_mgr in [
         ("IN", config['indian_stocks'], risk_mgr_in),
@@ -124,9 +131,9 @@ def run_scan():
                     continue
                 
                 # Identify ETFs to skip fundamental fetching (prevents yfinance timeouts)
-                etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD']
+                etf_keywords = ['GOLD', 'SILV', 'BEES', 'ETF', 'MON100', 'VOO', 'SCHD', 'USD', 'SOXL']
                 is_etf = any(kw in ticker.upper() for kw in etf_keywords)
-                
+
                 # Fetch fundamental data ONLY for individual equities
                 fund_data = {} if is_etf else fetcher.fetch_fundamentals(ticker)
 
@@ -137,12 +144,18 @@ def run_scan():
                 if signal_data['signal'] in ('HOLD', 'INSUFFICIENT_DATA'):
                     continue
 
+                # Fetch leverage multiplier (defaults to 1.0 for standard assets)
+                lev_factor = LEVERAGE_MAP.get(ticker, 1.0)
+
                 # 3. Calculate Risk Levels
                 risk_data = risk_mgr.calculate_levels(
                     current_price=signal_data['close'],
                     atr=signal_data['atr'],
-                    signal=signal_data['signal']
+                    signal=signal_data['signal'],
+                    is_etf=signal_data.get('is_etf', False),
+                    leverage_factor=lev_factor
                 )
+
                 signal_data.update(risk_data)
 
                 approved, reason, downgrade = risk_mgr.apply_filters(signal_data)

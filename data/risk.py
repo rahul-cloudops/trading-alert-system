@@ -3,57 +3,71 @@ class RiskManager:
         self.capital = capital
         self.risk_per_trade_pct = risk_per_trade_pct
         self.max_positions = max_positions
-        self.is_bull_market = True  # Defaults to True until checked
+        self.is_bull_market = True
 
     def set_market_regime(self, is_bull_market: bool):
         """Update the macro market regime before scanning."""
         self.is_bull_market = is_bull_market
 
-    def calculate_levels(self, current_price: float, atr: float, signal: str) -> dict:
-        """
-        ATR-based dynamic Stop Loss and Take Profit.
-        """
-        atr_multiplier_sl = 1.5   
-        atr_multiplier_tp1 = 2.0  
-        atr_multiplier_tp2 = 3.5  
+    def calculate_levels(self, current_price: float, atr: float, signal: str, is_etf: bool = False, leverage_factor: float = 1.0) -> dict:
+        """ATR-based dynamic levels with ETF override and leverage scaling."""
+        
+        # Scale the ATR distance based on the asset's leverage multiplier
+        atr_multiplier_sl = 1.5 * leverage_factor
+        atr_multiplier_tp1 = 2.0 * leverage_factor
+        atr_multiplier_tp2 = 3.5 * leverage_factor
 
         if signal == "BUY":
-            stop_loss    = round(current_price - (atr * atr_multiplier_sl), 2)
-            take_profit1 = round(current_price + (atr * atr_multiplier_tp1), 2)
-            take_profit2 = round(current_price + (atr * atr_multiplier_tp2), 2)
+            tech_sl = current_price - (atr * atr_multiplier_sl)
+            take_profit1 = current_price + (atr * atr_multiplier_tp1)
+            take_profit2 = current_price + (atr * atr_multiplier_tp2)
         else:  
-            stop_loss    = round(current_price + (atr * atr_multiplier_sl), 2)
-            take_profit1 = round(current_price - (atr * atr_multiplier_tp1), 2)
-            take_profit2 = round(current_price - (atr * atr_multiplier_tp2), 2)
+            tech_sl = current_price + (atr * atr_multiplier_sl)
+            take_profit1 = current_price - (atr * atr_multiplier_tp1)
+            take_profit2 = current_price - (atr * atr_multiplier_tp2)
 
-        risk_per_share = abs(current_price - stop_loss)
+        risk_per_share = abs(current_price - tech_sl)
         
-        # Dynamic Risk Allocation: Cut risk in half during bear markets
         actual_risk_pct = self.risk_per_trade_pct if self.is_bull_market else (self.risk_per_trade_pct / 2)
-        position_size   = self.calculate_position_size(risk_per_share, actual_risk_pct)
+        position_size = self.calculate_position_size(risk_per_share, current_price, actual_risk_pct)
         
         risk_reward = round(abs(take_profit2 - current_price) / risk_per_share, 2) if risk_per_share > 0 else 0
 
+        # --- ETF Accumulation Override ---
+        # Leveraged ETFs MUST retain their stop-loss to prevent decay destruction
+        if is_etf and leverage_factor == 1.0:
+            final_sl = 0.0  
+            sl_percent = 0.0
+        else:
+            final_sl = round(tech_sl, 2)
+            sl_percent = round((risk_per_share / current_price) * 100, 2) if current_price > 0 else 0
+
         return {
-            "entry_price": current_price,
-            "stop_loss": stop_loss,
-            "take_profit_1": take_profit1,  
-            "take_profit_2": take_profit2,  
+            "entry_price": round(current_price, 2),
+            "stop_loss": final_sl,
+            "take_profit_1": round(take_profit1, 2),  
+            "take_profit_2": round(take_profit2, 2),  
             "risk_per_share": round(risk_per_share, 2),
             "position_size_units": position_size,
             "capital_at_risk": round(risk_per_share * position_size, 2),
             "risk_reward_ratio": risk_reward,
-            "sl_percent": round((risk_per_share / current_price) * 100, 2) if current_price > 0 else 0,
+            "sl_percent": sl_percent,
         }
 
-    def calculate_position_size(self, risk_per_share: float, actual_risk_pct: float) -> int:
-        """Position sizing based on dynamically adjusted % capital risk."""
-        if risk_per_share <= 0:
+    def calculate_position_size(self, risk_per_share: float, current_price: float, actual_risk_pct: float) -> int:
+        """Position sizing based on dynamically adjusted % capital risk and 20% portfolio limits."""
+        if risk_per_share <= 0 or current_price <= 0:
             return 0
+            
+        # 1. Units allowed based on risk budget
         max_loss = self.capital * (actual_risk_pct / 100)
-        units = int(max_loss / risk_per_share)
-        max_single_position = int(self.capital * 0.20 / risk_per_share)
-        return min(units, max_single_position)
+        units_by_risk = int(max_loss / risk_per_share)
+        
+        # 2. Units allowed based on total portfolio concentration (Max 20% capital in one asset)
+        max_position_value = self.capital * 0.20
+        max_units_by_value = int(max_position_value / current_price)
+        
+        return min(units_by_risk, max_units_by_value)
 
     def apply_filters(self, signal_data: dict) -> tuple[bool, str, str]:
         """Returns (approved, reason, downgrade_signal)"""

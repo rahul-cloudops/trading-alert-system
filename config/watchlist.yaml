@@ -1,37 +1,44 @@
 indian_stocks:
-  - "RELIANCE.NS"
-  - "INFY.NS"
-  - "TCS.NS"
+  # Core Index & Passive Growth
+  - "NIFTYBEES.NS"
+  - "MON100.NS"
+  
+  # Stable Financials & Infrastructure
   - "HDFCBANK.NS"
   - "ICICIBANK.NS"
-  - "WIPRO.NS"
-  - "LT.NS"
   - "BAJFINANCE.NS"
-  - "TITAN.NS"
-  - "ADANIENT.NS"
-  - "TATAGOLD.NS"
-  - "NIFTYBEES.NS"
   - "ICICIAMC.NS"
-  - "METALIETF.NS"
-  - "SILVERIETF.NS"
-  - "MON100.NS"
-  - "TATSILV.NS"
+  - "LT.NS"
+  
+  # High-Quality IT & Consumption
+  - "RELIANCE.NS"
+  - "TCS.NS"
+  - "INFY.NS"
+  - "TITAN.NS"
+  
+  # Commodity Hedges (Deduplicated)
+  - "TATAGOLD.NS"
   - "SILVERIETF.NS"
 
 us_stocks:
-  - "AAPL"
-  - "MSFT"
-  - "NVDA"
-  - "GOOGL"
-  - "META"
-  - "AMZN"
-  - "TSLA"
-  - "AMD"
-  - "ASML"
-  - "SOXL"
+  # Core Index Anchors (Low Risk)
   - "VOO"
   - "SCHD"
-  - "USD"
+  
+  # Mega-Cap Tech Compounders
+  - "AAPL"
+  - "MSFT"
+  - "GOOGL"
+  - "AMZN"
+  - "META"
+  
+  # Semiconductors (Unleveraged Growth)
+  - "NVDA"
+  - "AMD"
+  - "ASML"
+  
+  # Consumer / Auto
+  - "TSLA"
 
 portfolio_capital_inr: 100000
 portfolio_capital_usd: 200
