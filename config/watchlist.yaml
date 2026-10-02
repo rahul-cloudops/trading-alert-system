@@ -23,7 +23,9 @@ indian_stocks:
 us_stocks:
   # Core Index Anchors (Low Risk)
   - "VOO"
+  - "QQQ"
   - "SCHD"
+  - "VTI"
   
   # Mega-Cap Tech Compounders
   - "AAPL"
@@ -31,14 +33,23 @@ us_stocks:
   - "GOOGL"
   - "AMZN"
   - "META"
+  - "ROM"
   
   # Semiconductors (Unleveraged Growth)
   - "NVDA"
   - "AMD"
   - "ASML"
+  - "USD"
+  - "SOXL"
   
   # Consumer / Auto
   - "TSLA"
+
+  # Global Exposure
+  - "EWY"
+  - "EWT"
+  - "EWJ"
+  - "EIS"
 
 portfolio_capital_inr: 100000
 portfolio_capital_usd: 200
